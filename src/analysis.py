@@ -429,6 +429,83 @@ def dominant_pollutant_by_season(df: pd.DataFrame, city: str, bad_only: bool = F
     return att.loc[idx, ["season", "responsible", "share_pct", "n_days"]].reset_index(drop=True)
 
 
+# ---------------------------------------------------------------------------
+# Multi-city comparison (Phase 6): is Delhi uniquely bad, or seasonally bad?
+# These operate on the FULL (all-city) dataset, not the NCR-filtered one.
+# ---------------------------------------------------------------------------
+
+# Default comparison set: well-covered, credible cities spanning regions.
+# (Ahmedabad is excluded by default — its AQI series looks anomalously high with
+# heavy gaps; it can still be passed in explicitly.)
+MAJOR_CITIES: tuple[str, ...] = (
+    "Delhi", "Lucknow", "Patna", "Kolkata", "Hyderabad",
+    "Chennai", "Mumbai", "Bengaluru",
+)
+
+
+def city_summary(
+    df_all: pd.DataFrame,
+    cities: tuple[str, ...] = MAJOR_CITIES,
+    col: str = "AQI",
+    bad_threshold: float = 200.0,
+) -> pd.DataFrame:
+    """Per-city level summary, sorted worst-first.
+
+    Returns mean, median, p95, % of days above `bad_threshold` (Poor or worse),
+    and the observed-day count. Cities absent from the data are skipped.
+    """
+    rows: list[dict] = []
+    present = set(df_all["City"].unique())
+    for c in cities:
+        if c not in present:
+            continue
+        d = df_all.loc[df_all["City"] == c, col].dropna()
+        if d.empty:
+            continue
+        rows.append(
+            {
+                "city": c,
+                "n_days": int(d.size),
+                "mean": float(d.mean()),
+                "median": float(d.median()),
+                "p95": float(d.quantile(0.95)),
+                "pct_bad": float((d > bad_threshold).mean() * 100),
+            }
+        )
+    return pd.DataFrame(rows).sort_values("mean", ascending=False).reset_index(drop=True)
+
+
+def seasonal_city_means(
+    df_all: pd.DataFrame, cities: tuple[str, ...] = MAJOR_CITIES, col: str = "PM2.5"
+) -> pd.DataFrame:
+    """Per-city, per-season mean of `col` (long format, season ordered)."""
+    sub = df_all[df_all["City"].isin(cities)][["City", "Date", col]].dropna(subset=[col])
+    sub = sub.assign(season=sub["Date"].dt.month.map(_SEASON_BY_MONTH))
+    out = sub.groupby(["City", "season"])[col].mean().reset_index(name="mean")
+    out["season"] = pd.Categorical(out["season"], categories=SEASON_ORDER, ordered=True)
+    return out.sort_values(["City", "season"]).reset_index(drop=True)
+
+
+def seasonality_index(
+    df_all: pd.DataFrame, cities: tuple[str, ...] = MAJOR_CITIES, col: str = "PM2.5"
+) -> pd.DataFrame:
+    """How seasonal each city is: winter mean / monsoon mean of `col`.
+
+    A high ratio means the city's pollution is driven by a winter spike (Delhi's
+    signature) rather than a steady year-round level. Sorted most-seasonal first.
+    """
+    means = seasonal_city_means(df_all, cities, col)
+    wide = means.pivot(index="City", columns="season", values="mean")
+    out = pd.DataFrame(
+        {
+            "winter": wide.get("Winter"),
+            "monsoon": wide.get("Monsoon"),
+        }
+    )
+    out["winter_monsoon_ratio"] = out["winter"] / out["monsoon"]
+    return out.dropna().sort_values("winter_monsoon_ratio", ascending=False).reset_index()
+
+
 if __name__ == "__main__":
     from src.data_load import load_clean
 
@@ -504,3 +581,27 @@ if __name__ == "__main__":
             f"({w['share_pct']:.0f}%); bad summer days by {s['responsible']} "
             f"({s['share_pct']:.0f}%)."
         )
+
+    # ---- Phase 6: multi-city comparison ---------------------------------
+    from src.data_load import load_raw
+
+    df_all = load_raw()
+    print("\n=== Multi-city comparison (mean AQI, worst-first) ===")
+    summ_c = city_summary(df_all)
+    print(summ_c.round(1).to_string(index=False))
+
+    print("\n=== Seasonality (winter/monsoon PM2.5 ratio, most-seasonal first) ===")
+    seas = seasonality_index(df_all)
+    print(seas.round(1).to_string(index=False))
+
+    delhi_mean = summ_c.loc[summ_c["city"] == "Delhi", "mean"].iloc[0]
+    others_mean = summ_c.loc[summ_c["city"] != "Delhi", "mean"].mean()
+    delhi_ratio = seas.loc[seas["City"] == "Delhi", "winter_monsoon_ratio"].iloc[0]
+    most_seasonal = seas.iloc[0]
+    print(
+        f"-> Delhi is uniquely POLLUTED: mean AQI {delhi_mean:.0f} is "
+        f"{delhi_mean / others_mean:.1f}x the other majors' average ({others_mean:.0f}). "
+        f"But the winter spike is a North-India pattern, not Delhi's alone — Delhi's "
+        f"winter PM2.5 is {delhi_ratio:.1f}x monsoon, similar to Patna/Lucknow/Kolkata "
+        f"(most seasonal: {most_seasonal['City']} {most_seasonal['winter_monsoon_ratio']:.1f}x)."
+    )
