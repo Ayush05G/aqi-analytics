@@ -25,12 +25,22 @@ TARGET_FILE = "city_day.csv"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
-def configure_credentials(username: str | None = None, key: str | None = None) -> None:
-    """Set Kaggle env-var credentials if provided (e.g. from st.secrets)."""
+def configure_credentials(
+    username: str | None = None,
+    key: str | None = None,
+    api_token: str | None = None,
+) -> None:
+    """Set Kaggle env-var credentials if provided (e.g. from st.secrets).
+
+    Supports both the classic username/key pair and the newer single KGAT_ token
+    (KAGGLE_API_TOKEN), so either kind of secret works on Streamlit Cloud.
+    """
     if username:
         os.environ["KAGGLE_USERNAME"] = username
     if key:
         os.environ["KAGGLE_KEY"] = key
+    if api_token:
+        os.environ["KAGGLE_API_TOKEN"] = api_token
 
 
 def _authenticated_api():

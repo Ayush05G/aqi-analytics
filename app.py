@@ -45,7 +45,9 @@ def _apply_kaggle_secrets() -> None:
     """Push Kaggle creds from st.secrets into env vars, if a secrets file exists."""
     try:
         secrets = st.secrets
-        if "KAGGLE_USERNAME" in secrets and "KAGGLE_KEY" in secrets:
+        if "KAGGLE_API_TOKEN" in secrets:
+            configure_credentials(api_token=secrets["KAGGLE_API_TOKEN"])
+        elif "KAGGLE_USERNAME" in secrets and "KAGGLE_KEY" in secrets:
             configure_credentials(secrets["KAGGLE_USERNAME"], secrets["KAGGLE_KEY"])
         elif "kaggle" in secrets:
             configure_credentials(secrets["kaggle"].get("username"), secrets["kaggle"].get("key"))

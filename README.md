@@ -71,13 +71,16 @@ token to `~/.kaggle/access_token`, or place the classic `kaggle.json` in
 1. Push this repo to GitHub (the dataset stays git-ignored).
 2. On <https://share.streamlit.io>, create an app pointing at `app.py`.
 3. In **App settings → Secrets**, add your Kaggle credentials so the app can
-   fetch `city_day.csv` on first load:
+   fetch `city_day.csv` on first load. Either form works:
    ```toml
-   KAGGLE_USERNAME = "your_username"
-   KAGGLE_KEY = "your_key"
+   # Newer KGAT_ token (from Kaggle Settings → API → Create New Token):
+   KAGGLE_API_TOKEN = "KGAT_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+   # …or the classic username/key pair:
+   # KAGGLE_USERNAME = "your_username"
+   # KAGGLE_KEY = "your_key"
    ```
-   (Use a classic `kaggle.json` username/key pair here.) The app downloads only
-   `city_day.csv` (~2.6 MB), not the full archive.
+   The app downloads only `city_day.csv` (~2.6 MB), not the full archive.
 
 ## Data
 
