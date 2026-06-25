@@ -42,18 +42,44 @@ AQI_BANDS = [
 # Data + cached computations
 # --------------------------------------------------------------------------- #
 def _apply_kaggle_secrets() -> None:
-    """Push Kaggle creds from st.secrets into env vars, if a secrets file exists."""
+    """Push Kaggle creds from st.secrets into env vars / token file, with logging.
+
+    Accepts the token as a top-level KAGGLE_API_TOKEN, a classic username/key
+    pair, or a nested [kaggle] section (api_token / token / key+username).
+    """
     try:
         secrets = st.secrets
-        if "KAGGLE_API_TOKEN" in secrets:
-            configure_credentials(api_token=secrets["KAGGLE_API_TOKEN"])
-        elif "KAGGLE_USERNAME" in secrets and "KAGGLE_KEY" in secrets:
-            configure_credentials(secrets["KAGGLE_USERNAME"], secrets["KAGGLE_KEY"])
-        elif "kaggle" in secrets:
-            configure_credentials(secrets["kaggle"].get("username"), secrets["kaggle"].get("key"))
-    except Exception:
-        # No secrets.toml (e.g. local dev) — rely on ~/.kaggle or an existing file.
-        pass
+    except Exception as exc:
+        print(f"[app] no st.secrets available (local dev?): {exc}", flush=True)
+        return
+
+    try:
+        top_keys = list(secrets.keys())
+    except Exception as exc:
+        print(f"[app] could not read st.secrets keys: {exc}", flush=True)
+        return
+    print(f"[app] st.secrets top-level keys: {top_keys}", flush=True)
+
+    if "KAGGLE_API_TOKEN" in secrets:
+        configure_credentials(api_token=str(secrets["KAGGLE_API_TOKEN"]))
+    elif "KAGGLE_USERNAME" in secrets and "KAGGLE_KEY" in secrets:
+        configure_credentials(str(secrets["KAGGLE_USERNAME"]), str(secrets["KAGGLE_KEY"]))
+    elif "kaggle" in secrets:
+        sec = secrets["kaggle"]
+        configure_credentials(
+            username=sec.get("username"),
+            key=sec.get("key"),
+            api_token=sec.get("api_token") or sec.get("token") or sec.get("KAGGLE_API_TOKEN"),
+        )
+    else:
+        print("[app] WARNING: no recognized Kaggle secret found in st.secrets.", flush=True)
+
+    print(
+        "[app] kaggle creds applied: "
+        f"api_token={'set' if os.environ.get('KAGGLE_API_TOKEN') else 'unset'}, "
+        f"username={'set' if os.environ.get('KAGGLE_USERNAME') else 'unset'}",
+        flush=True,
+    )
 
 
 @st.cache_data(show_spinner="Loading air-quality data…")

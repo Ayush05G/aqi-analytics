@@ -33,10 +33,11 @@ def configure_credentials(
     key: str | None = None,
     api_token: str | None = None,
 ) -> None:
-    """Set Kaggle env-var credentials if provided (e.g. from st.secrets).
+    """Set Kaggle credentials if provided (e.g. from st.secrets).
 
-    Supports both the classic username/key pair and the newer single KGAT_ token
-    (KAGGLE_API_TOKEN), so either kind of secret works on Streamlit Cloud.
+    Supports both the classic username/key pair and the newer single KGAT_ token.
+    For the token we set KAGGLE_API_TOKEN *and* write ~/.kaggle/access_token —
+    the client reads either, and the file path is the most reliable on cloud.
     """
     if username:
         os.environ["KAGGLE_USERNAME"] = username
@@ -44,6 +45,9 @@ def configure_credentials(
         os.environ["KAGGLE_KEY"] = key
     if api_token:
         os.environ["KAGGLE_API_TOKEN"] = api_token
+        token_path = Path.home() / ".kaggle" / "access_token"
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text(api_token.strip())
 
 
 def _authenticated_api():
