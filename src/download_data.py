@@ -17,7 +17,10 @@ CLI:  python -m src.download_data            # just city_day.csv
 from __future__ import annotations
 
 import os
+import socket
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
 
 DATASET = "rohanrao/air-quality-data-in-india"
@@ -55,11 +58,16 @@ def download(
     dataset: str = DATASET,
     data_dir: Path = DATA_DIR,
     single_file: bool = True,
+    socket_timeout: int = 30,
 ) -> Path:
     """Download city_day.csv (single_file) or the whole dataset; return its path."""
     data_dir.mkdir(parents=True, exist_ok=True)
+    # Force individual network operations to fail rather than block forever
+    # (the Kaggle client doesn't expose request timeouts).
+    socket.setdefaulttimeout(socket_timeout)
+    print("[kaggle] authenticating…", flush=True)
     api = _authenticated_api()
-    print(f"Authenticated. Downloading '{dataset}' -> {data_dir} ...")
+    print(f"[kaggle] authenticated; downloading '{dataset}' -> {data_dir} …", flush=True)
     if single_file:
         api.dataset_download_file(
             dataset, file_name=TARGET_FILE, path=str(data_dir), force=True
@@ -81,16 +89,28 @@ def download(
         raise FileNotFoundError(
             f"Expected {TARGET_FILE} in {data_dir} but it's missing. CSVs present: {found}"
         )
-    print(f"OK: {target} ({target.stat().st_size / 1e6:.1f} MB)")
+    print(f"[kaggle] OK: {target} ({target.stat().st_size / 1e6:.1f} MB)", flush=True)
     return target
 
 
-def ensure_city_day(data_dir: Path = DATA_DIR) -> Path:
-    """Return path to city_day.csv, downloading it only if not already present."""
+def ensure_city_day(data_dir: Path = DATA_DIR, timeout_seconds: int = 120) -> Path:
+    """Return path to city_day.csv, downloading it (with a hard timeout) if absent.
+
+    The download runs in a worker thread bounded by `timeout_seconds`, so a stalled
+    Kaggle connection surfaces as a clear error instead of hanging the app forever.
+    """
     target = data_dir / TARGET_FILE
     if target.exists():
         return target
-    return download(data_dir=data_dir, single_file=True)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(download, data_dir=data_dir, single_file=True)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FuturesTimeout as exc:
+            raise TimeoutError(
+                f"Kaggle download exceeded {timeout_seconds}s. Check the "
+                "KAGGLE_API_TOKEN secret and that Kaggle is reachable."
+            ) from exc
 
 
 if __name__ == "__main__":

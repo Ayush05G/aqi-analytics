@@ -59,9 +59,12 @@ def _apply_kaggle_secrets() -> None:
 @st.cache_data(show_spinner="Loading air-quality data…")
 def get_data() -> pd.DataFrame:
     """Ensure city_day.csv exists (download on cloud) then load + clean it."""
+    print("[app] get_data: applying secrets + ensuring dataset…", flush=True)
     _apply_kaggle_secrets()
     path = ensure_city_day()
-    return load_clean(path)
+    df = load_clean(path)
+    print(f"[app] get_data: loaded {len(df):,} rows for {sorted(df['City'].unique())}", flush=True)
+    return df
 
 
 @st.cache_data(show_spinner="Decomposing the seasonal cycle…")
@@ -292,6 +295,17 @@ with tab_events:
 with tab_forecast:
     st.subheader(f"Can we forecast {city}'s AQI a few weeks out?")
     horizon = st.slider("Forecast horizon (days)", 7, 30, 14, step=1)
+
+    # Fitting SARIMA is the heaviest step (a small order search + two refits) and
+    # would otherwise run on every page load. Gate it behind a button so the other
+    # tabs stay fast and the cloud instance isn't pinned on each rerun.
+    if st.button("▶ Run forecast", type="primary"):
+        st.session_state["run_forecast"] = True
+
+    if not st.session_state.get("run_forecast"):
+        st.info("Click **Run forecast** to fit the SARIMA model and backtest it "
+                "(~30–90s on the cloud; cached afterwards).")
+        st.stop()
 
     try:
         result = cached_backtest(city, horizon)
