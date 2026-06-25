@@ -19,6 +19,8 @@ analysis/forecast logic kept as pure, tested functions.
 | **Seasonality** | When is it worst? | PM2.5 peaks in **November (~238)** and bottoms in **August (~43)** — a ~5× swing, confirmed by seasonal decomposition. |
 | **Events** | What drives bad-air days? | **Stubble burning** lifts Oct–Nov PM2.5 to **1.8× the rest of the year**; **Diwali** adds **+85%** over the prior fortnight; the **2020 lockdown** cut Apr–May PM2.5 by **~50%**. |
 | **Forecast** | Can we predict AQI? | A **SARIMA(1,1,2)(0,1,1,7)** model beats naive baselines on a 30-day holdout (MAE 24.7 vs 29.6). |
+| **Sources** | Which pollutant drives bad days? | Recomputed CPCB sub-indices (validated at **r=0.93** vs the dataset's AQI) show Delhi's bad days are **overwhelmingly particulate** — PM2.5 in winter (**86%**), PM10 rising with summer/monsoon dust. |
+| **Compare cities** | Is Delhi uniquely bad? | Delhi's mean AQI (**259**) is **~1.8×** other major cities and **65%** of its days are Poor+ — but the winter spike is a **shared North-India pattern** (Patna, Lucknow, Kolkata similar), while coastal/southern cities stay clean and flat. |
 
 ## Methodology notes (why the numbers are trustworthy)
 
@@ -37,7 +39,8 @@ analysis/forecast logic kept as pure, tested functions.
 
 ```
 src/data_load.py     load + clean + filter to Delhi-NCR (pure)
-src/analysis.py      trends, seasonal decomposition, event analysis (pure)
+src/analysis.py      trends, decomposition, events, source attribution,
+                     multi-city comparison (pure)
 src/forecast.py      SARIMA backtest + forecast (pure, isolated)
 src/download_data.py Kaggle fetch / runtime bootstrap
 app.py               Streamlit UI only; imports from src/
@@ -93,11 +96,9 @@ Kaggle — [Air Quality Data in India (2015–2020)](https://www.kaggle.com/data
 
 Deliberately out of scope for now, but natural extensions:
 
-- **Pollutant source attribution** — which pollutant drives bad days per season
-  (PM2.5 in winter vs O₃ in summer).
-- **Multi-city comparison** — Delhi vs Mumbai, Kolkata, Bengaluru: is Delhi
-  uniquely bad, or seasonally bad?
 - **Weather correlation** — wind/temperature vs dispersion.
+- **8-hour-max sub-indices** — recompute O₃/CO attribution from the hourly file
+  so ozone isn't understated (the Sources tab uses daily means).
 - **Model comparison** — SARIMA vs Prophet vs ML.
 - **Policy-impact analysis** — odd-even, GRAP interventions.
 - **Health-impact layer** — days exceeding WHO limits.

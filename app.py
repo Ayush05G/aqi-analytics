@@ -12,7 +12,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.analysis import (
+    MAJOR_CITIES,
     SEASON_ORDER,
+    city_summary,
     compute_sub_indices,
     diwali_effect,
     dominant_pollutant_by_season,
@@ -22,11 +24,12 @@ from src.analysis import (
     monthly_climatology,
     seasonal_attribution,
     seasonal_decomposition,
+    seasonality_index,
     stubble_season_effect,
     validate_computed_aqi,
     yearly_aqi_trend,
 )
-from src.data_load import load_clean
+from src.data_load import load_clean, load_raw
 from src.download_data import configure_credentials, ensure_city_day
 from src.forecast import backtest, forecast_future, naive_persistence, naive_seasonal
 
@@ -113,6 +116,13 @@ def cached_future(city: str, horizon: int):
     return forecast_future(get_data(), city, "AQI", horizon=horizon)
 
 
+@st.cache_data(show_spinner="Loading all cities for comparison…")
+def get_all_data() -> pd.DataFrame:
+    """Full all-city dataset (for the comparison tab), not NCR-filtered."""
+    _apply_kaggle_secrets()
+    return load_raw(ensure_city_day())
+
+
 @st.cache_data(show_spinner="Attributing pollution sources…")
 def cached_attribution(city: str, bad_only: bool):
     df_ = get_data()
@@ -162,8 +172,9 @@ with st.sidebar:
         "days only; the forecast interpolates a handful of short daily gaps."
     )
 
-tab_trend, tab_season, tab_events, tab_forecast, tab_sources = st.tabs(
-    ["📉 Long-run trend", "🗓️ Seasonality", "🎆 Events", "🔮 Forecast", "🧪 Sources"]
+tab_trend, tab_season, tab_events, tab_forecast, tab_sources, tab_compare = st.tabs(
+    ["📉 Long-run trend", "🗓️ Seasonality", "🎆 Events", "🔮 Forecast",
+     "🧪 Sources", "🏙️ Compare cities"]
 )
 
 
@@ -460,4 +471,76 @@ with tab_sources:
         "concentrations; the responsible pollutant is the one with the highest "
         "sub-index. Note: O₃ is understated here because city_day.csv provides "
         "daily-mean O₃, whereas CPCB's ozone sub-index uses the 8-hour maximum."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Tab 6 — Compare cities
+# --------------------------------------------------------------------------- #
+with tab_compare:
+    st.subheader("Is Delhi uniquely bad, or part of a regional pattern?")
+
+    df_all = get_all_data()
+    available = sorted(df_all["City"].unique())
+    default = [c for c in MAJOR_CITIES if c in available]
+    picked = st.multiselect("Cities to compare", available, default=default)
+    if len(picked) < 2:
+        st.info("Pick at least two cities to compare.")
+        st.stop()
+
+    picked_t = tuple(picked)
+    summary = city_summary(df_all, picked_t, "AQI")
+    seas = seasonality_index(df_all, picked_t, "PM2.5")
+
+    # Mean AQI per city, Delhi highlighted.
+    colors = ["#e53935" if c == "Delhi" else "#90a4ae" for c in summary["city"]]
+    fig = go.Figure(go.Bar(
+        x=summary["city"], y=summary["mean"], marker_color=colors,
+        text=summary["mean"].round(0), textposition="outside",
+        customdata=summary["pct_bad"].round(0),
+        hovertemplate="%{x}: mean AQI %{y:.0f}<br>%{customdata:.0f}% days Poor+<extra></extra>",
+    ))
+    fig.update_layout(height=380, yaxis_title="Mean AQI (all years)", xaxis_title=None, margin=dict(t=10, b=10))
+    st.plotly_chart(fig, width="stretch")
+
+    # Annual cycle (PM2.5) per city — shows whether the winter spike is shared.
+    fig2 = go.Figure()
+    for c in picked:
+        clim = monthly_climatology(df_all, c, "PM2.5")
+        fig2.add_trace(go.Scatter(
+            x=clim["month"], y=clim["mean"], mode="lines+markers", name=c,
+            line=dict(width=3 if c == "Delhi" else 1.5),
+        ))
+    fig2.update_layout(
+        height=400, yaxis_title="Mean PM2.5", xaxis_title=None,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        title="Annual PM2.5 cycle by city", margin=dict(t=30, b=10),
+    )
+    st.plotly_chart(fig2, width="stretch")
+
+    if "Delhi" in picked:
+        delhi_mean = summary.loc[summary["city"] == "Delhi", "mean"].iloc[0]
+        delhi_bad = summary.loc[summary["city"] == "Delhi", "pct_bad"].iloc[0]
+        others = summary.loc[summary["city"] != "Delhi", "mean"]
+        ratio = delhi_mean / others.mean() if not others.empty else float("nan")
+        most_seasonal = seas.iloc[0]
+        delhi_seas = seas.loc[seas["City"] == "Delhi", "winter_monsoon_ratio"]
+        delhi_seas_v = delhi_seas.iloc[0] if not delhi_seas.empty else float("nan")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Delhi mean AQI", f"{delhi_mean:.0f}", f"{ratio:.1f}× others")
+        c2.metric("Delhi days Poor+", f"{delhi_bad:.0f}%")
+        c3.metric("Delhi winter/monsoon PM2.5", f"{delhi_seas_v:.1f}×")
+        insight(
+            f"Delhi is uniquely **polluted** — mean AQI **{delhi_mean:.0f}**, about "
+            f"**{ratio:.1f}×** the other selected cities, with **{delhi_bad:.0f}%** of days "
+            "Poor-or-worse. But the winter spike is a **regional North-India pattern**, "
+            f"not Delhi's alone: its winter PM2.5 is **{delhi_seas_v:.1f}×** its monsoon "
+            f"level, comparable to other Gangetic-plain cities (most seasonal here: "
+            f"{most_seasonal['City']} {most_seasonal['winter_monsoon_ratio']:.1f}×). Coastal "
+            "and southern cities stay far cleaner and flatter year-round."
+        )
+    st.caption(
+        "Means use observed days only; cities differ in coverage (e.g. Mumbai/Kolkata "
+        "have fewer AQI days). Ahmedabad is excluded from the default set — its series "
+        "looks anomalously high — but can be added manually."
     )
