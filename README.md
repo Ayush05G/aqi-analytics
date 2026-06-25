@@ -1,5 +1,7 @@
 # 🌫️ Delhi-NCR Air Quality Analytics
 
+**🔗 Live app: https://aqi-analytics-in.streamlit.app**
+
 An analytics project on Delhi-NCR air quality that goes **beyond basic EDA**. It
 quantifies *why* and *when* Delhi's air gets bad — long-run trends, the seasonal
 cycle, the impact of specific events (Diwali, stubble burning, the COVID

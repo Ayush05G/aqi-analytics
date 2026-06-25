@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 from statsmodels.tsa.seasonal import DecomposeResult, seasonal_decompose
 
@@ -305,6 +306,129 @@ def lockdown_summary(lockdown_table: pd.DataFrame) -> dict[str, float]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Source attribution (Phase 5): which pollutant drives bad-air days per season.
+# We recompute each day's CPCB sub-index per pollutant from raw concentrations,
+# take the pollutant with the highest sub-index as the "responsible" one (this is
+# how India's National AQI is defined), validate that the max sub-index
+# reproduces the dataset's AQI, then summarise by season.
+# ---------------------------------------------------------------------------
+
+# CPCB National AQI breakpoints: (conc_low, conc_high, index_low, index_high).
+# Concentrations in ug/m3 except CO in mg/m3. Bands are continuous; values above
+# the top band are linearly extrapolated (the dataset's AQI exceeds 500).
+AQI_BREAKPOINTS: dict[str, list[tuple[float, float, float, float]]] = {
+    "PM2.5": [(0, 30, 0, 50), (30, 60, 50, 100), (60, 90, 100, 200),
+              (90, 120, 200, 300), (120, 250, 300, 400), (250, 500, 400, 500)],
+    "PM10": [(0, 50, 0, 50), (50, 100, 50, 100), (100, 250, 100, 200),
+             (250, 350, 200, 300), (350, 430, 300, 400), (430, 600, 400, 500)],
+    "NO2": [(0, 40, 0, 50), (40, 80, 50, 100), (80, 180, 100, 200),
+            (180, 280, 200, 300), (280, 400, 300, 400), (400, 500, 400, 500)],
+    "CO": [(0, 1, 0, 50), (1, 2, 50, 100), (2, 10, 100, 200),
+           (10, 17, 200, 300), (17, 34, 300, 400), (34, 50, 400, 500)],
+    "SO2": [(0, 40, 0, 50), (40, 80, 50, 100), (80, 380, 100, 200),
+            (380, 800, 200, 300), (800, 1600, 300, 400), (1600, 2000, 400, 500)],
+    "O3": [(0, 50, 0, 50), (50, 100, 50, 100), (100, 168, 100, 200),
+           (168, 208, 200, 300), (208, 748, 300, 400), (748, 1000, 400, 500)],
+    "NH3": [(0, 200, 0, 50), (200, 400, 50, 100), (400, 800, 100, 200),
+            (800, 1200, 200, 300), (1200, 1800, 300, 400), (1800, 2400, 400, 500)],
+}
+
+ATTRIB_POLLUTANTS: tuple[str, ...] = tuple(AQI_BREAKPOINTS.keys())
+
+# Calendar month -> meteorological season used throughout the attribution.
+_SEASON_BY_MONTH = {
+    12: "Winter", 1: "Winter", 2: "Winter",
+    3: "Summer", 4: "Summer", 5: "Summer", 6: "Summer",
+    7: "Monsoon", 8: "Monsoon", 9: "Monsoon",
+    10: "Post-monsoon", 11: "Post-monsoon",
+}
+SEASON_ORDER: tuple[str, ...] = ("Winter", "Summer", "Monsoon", "Post-monsoon")
+
+
+def _sub_index_series(conc: pd.Series, pollutant: str) -> pd.Series:
+    """CPCB sub-index for a concentration series (vectorised, NaN-safe)."""
+    bands = AQI_BREAKPOINTS[pollutant]
+    out = pd.Series(np.nan, index=conc.index, dtype="float64")
+    assigned = pd.Series(False, index=conc.index)
+    for lo, hi, ilo, ihi in bands:
+        mask = conc.notna() & ~assigned & (conc <= hi)
+        out[mask] = ilo + (ihi - ilo) * (conc[mask] - lo) / (hi - lo)
+        assigned |= mask
+    # Extrapolate values above the top band using the last band's slope.
+    lo, hi, ilo, ihi = bands[-1]
+    tail = conc.notna() & ~assigned
+    out[tail] = ilo + (ihi - ilo) * (conc[tail] - lo) / (hi - lo)
+    return out
+
+
+def compute_sub_indices(df: pd.DataFrame, city: str) -> pd.DataFrame:
+    """Per-day sub-indices, computed AQI (max sub-index), and responsible pollutant.
+
+    Returns a frame indexed like the city's rows with: Date, one column per
+    pollutant sub-index, computed_aqi, responsible, plus the dataset AQI for
+    validation. Days with fewer than 3 available sub-indices are dropped (CPCB
+    requires a minimum set before an AQI is meaningful).
+    """
+    sub = _city_frame(df, city).copy()
+    si_cols = {}
+    for p in ATTRIB_POLLUTANTS:
+        if p in sub.columns:
+            si_cols[f"SI_{p}"] = _sub_index_series(sub[p], p)
+    si = pd.DataFrame(si_cols, index=sub.index)
+
+    enough = si.notna().sum(axis=1) >= 3
+    si = si[enough]
+    result = pd.DataFrame({"Date": sub.loc[enough, "Date"], "AQI": sub.loc[enough, "AQI"]})
+    result = pd.concat([result, si], axis=1)
+    result["computed_aqi"] = si.max(axis=1)
+    result["responsible"] = (
+        si.idxmax(axis=1).str.removeprefix("SI_")
+    )
+    return result.reset_index(drop=True)
+
+
+def validate_computed_aqi(attrib: pd.DataFrame) -> dict[str, float]:
+    """Compare computed AQI (max sub-index) against the dataset's AQI column."""
+    both = attrib.dropna(subset=["AQI", "computed_aqi"])
+    err = both["computed_aqi"] - both["AQI"]
+    return {
+        "n": int(len(both)),
+        "correlation": float(both["computed_aqi"].corr(both["AQI"])),
+        "mae": float(err.abs().mean()),
+        "within_10pct": float((err.abs() <= 0.10 * both["AQI"]).mean() * 100),
+    }
+
+
+def seasonal_attribution(
+    df: pd.DataFrame, city: str, bad_only: bool = False, bad_threshold: float = 200.0
+) -> pd.DataFrame:
+    """Share (%) of days each pollutant is responsible, by season.
+
+    With bad_only=True, restrict to bad-air days (computed AQI > bad_threshold),
+    answering "what drives the *worst* days in each season".
+    """
+    attrib = compute_sub_indices(df, city)
+    attrib = attrib.assign(season=attrib["Date"].dt.month.map(_SEASON_BY_MONTH))
+    if bad_only:
+        attrib = attrib[attrib["computed_aqi"] > bad_threshold]
+
+    counts = (
+        attrib.groupby(["season", "responsible"]).size().rename("n_days").reset_index()
+    )
+    totals = counts.groupby("season")["n_days"].transform("sum")
+    counts["share_pct"] = 100.0 * counts["n_days"] / totals
+    counts["season"] = pd.Categorical(counts["season"], categories=SEASON_ORDER, ordered=True)
+    return counts.sort_values(["season", "share_pct"], ascending=[True, False]).reset_index(drop=True)
+
+
+def dominant_pollutant_by_season(df: pd.DataFrame, city: str, bad_only: bool = False) -> pd.DataFrame:
+    """The single most-responsible pollutant per season + its share."""
+    att = seasonal_attribution(df, city, bad_only=bad_only)
+    idx = att.groupby("season", observed=True)["share_pct"].idxmax()
+    return att.loc[idx, ["season", "responsible", "share_pct", "n_days"]].reset_index(drop=True)
+
+
 if __name__ == "__main__":
     from src.data_load import load_clean
 
@@ -359,3 +483,24 @@ if __name__ == "__main__":
         f"{summ['n_baseline_years']}-year baseline of {summ['baseline_mean']:.0f} "
         f"({summ['pct_change']:+.0f}%)."
     )
+
+    # ---- Phase 5: source attribution ------------------------------------
+    print(f"\n=== Source attribution (CPCB sub-indices) - {city} ===")
+    v = validate_computed_aqi(compute_sub_indices(df, city))
+    print(
+        f"Validation: computed AQI (max sub-index) vs dataset AQI on {v['n']} days "
+        f"-> corr={v['correlation']:.3f}, MAE={v['mae']:.1f}, "
+        f"within 10%: {v['within_10pct']:.0f}%"
+    )
+    print("\nDominant pollutant on BAD-air days (computed AQI > 200), by season:")
+    dom = dominant_pollutant_by_season(df, city, bad_only=True)
+    print(dom.round(1).to_string(index=False))
+    winter = dom[dom["season"] == "Winter"]
+    summer = dom[dom["season"] == "Summer"]
+    if not winter.empty and not summer.empty:
+        w, s = winter.iloc[0], summer.iloc[0]
+        print(
+            f"-> Bad winter days are driven by {w['responsible']} "
+            f"({w['share_pct']:.0f}%); bad summer days by {s['responsible']} "
+            f"({s['share_pct']:.0f}%)."
+        )
