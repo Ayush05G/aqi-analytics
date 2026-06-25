@@ -12,13 +12,18 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.analysis import (
+    SEASON_ORDER,
+    compute_sub_indices,
     diwali_effect,
+    dominant_pollutant_by_season,
     lockdown_effect,
     lockdown_summary,
     monthly_aqi_trend,
     monthly_climatology,
+    seasonal_attribution,
     seasonal_decomposition,
     stubble_season_effect,
+    validate_computed_aqi,
     yearly_aqi_trend,
 )
 from src.data_load import load_clean
@@ -108,6 +113,16 @@ def cached_future(city: str, horizon: int):
     return forecast_future(get_data(), city, "AQI", horizon=horizon)
 
 
+@st.cache_data(show_spinner="Attributing pollution sources…")
+def cached_attribution(city: str, bad_only: bool):
+    df_ = get_data()
+    return (
+        seasonal_attribution(df_, city, bad_only=bad_only),
+        dominant_pollutant_by_season(df_, city, bad_only=bad_only),
+        validate_computed_aqi(compute_sub_indices(df_, city)),
+    )
+
+
 def insight(text: str) -> None:
     """Render a plain-English, data-derived takeaway."""
     st.info(f"**Insight —** {text}")
@@ -147,8 +162,8 @@ with st.sidebar:
         "days only; the forecast interpolates a handful of short daily gaps."
     )
 
-tab_trend, tab_season, tab_events, tab_forecast = st.tabs(
-    ["📉 Long-run trend", "🗓️ Seasonality", "🎆 Events", "🔮 Forecast"]
+tab_trend, tab_season, tab_events, tab_forecast, tab_sources = st.tabs(
+    ["📉 Long-run trend", "🗓️ Seasonality", "🎆 Events", "🔮 Forecast", "🧪 Sources"]
 )
 
 
@@ -318,7 +333,8 @@ with tab_events:
 # --------------------------------------------------------------------------- #
 # Tab 4 — Forecast
 # --------------------------------------------------------------------------- #
-with tab_forecast:
+def render_forecast_tab(city: str) -> None:
+    """Forecast tab body, factored out so early returns don't halt the whole app."""
     st.subheader(f"Can we forecast {city}'s AQI a few weeks out?")
     horizon = st.slider("Forecast horizon (days)", 7, 30, 14, step=1)
 
@@ -331,14 +347,14 @@ with tab_forecast:
     if not st.session_state.get("run_forecast"):
         st.info("Click **Run forecast** to fit the SARIMA model and backtest it "
                 "(~30–90s on the cloud; cached afterwards).")
-        st.stop()
+        return
 
     try:
         result = cached_backtest(city, horizon)
         fut_mean, fut_ci = cached_future(city, horizon)
     except Exception as exc:
         st.warning(f"Couldn't fit a forecast for {city}: {exc}")
-        st.stop()
+        return
 
     recent_train = result.train.iloc[-90:]
     fig = go.Figure()
@@ -379,4 +395,69 @@ with tab_forecast:
     st.caption(
         f"Forward projection ({fut_mean.index.min().date()} → {fut_mean.index.max().date()}) "
         "is shown for context; with data ending mid-2020 it cannot be validated."
+    )
+
+
+with tab_forecast:
+    render_forecast_tab(city)
+
+
+# --------------------------------------------------------------------------- #
+# Tab 5 — Sources (pollutant attribution)
+# --------------------------------------------------------------------------- #
+with tab_sources:
+    st.subheader(f"Which pollutant drives {city}'s bad-air days, by season?")
+    bad_only = st.toggle("Bad-air days only (computed AQI > 200)", value=True)
+
+    try:
+        att, dom, val = cached_attribution(city, bad_only)
+    except Exception as exc:
+        st.warning(f"Couldn't run source attribution for {city}: {exc}")
+        st.stop()
+
+    # Stacked bar: pollutant share per season.
+    pollutants = sorted(att["responsible"].unique())
+    palette = {
+        "PM2.5": "#e53935", "PM10": "#fb8c00", "NO2": "#8e24aa",
+        "O3": "#1e88e5", "CO": "#6d4c41", "SO2": "#00897b", "NH3": "#7cb342",
+    }
+    fig = go.Figure()
+    for p in pollutants:
+        sub = att[att["responsible"] == p].set_index("season")["share_pct"]
+        sub = sub.reindex(SEASON_ORDER)
+        fig.add_trace(go.Bar(x=list(SEASON_ORDER), y=sub.values, name=p,
+                             marker_color=palette.get(p, "#90a4ae")))
+    fig.update_layout(
+        height=420, barmode="stack", yaxis_title="% of days pollutant is responsible",
+        xaxis_title=None, legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        margin=dict(t=10, b=10),
+    )
+    st.plotly_chart(fig, width="stretch")
+
+    c1, c2 = st.columns(2)
+    c1.metric("Computed-AQI vs dataset AQI", f"r = {val['correlation']:.2f}")
+    c2.metric("Days analysed", f"{val['n']:,}")
+
+    dom_map = {r["season"]: (r["responsible"], r["share_pct"]) for _, r in dom.iterrows()}
+    w = dom_map.get("Winter")
+    s = dom_map.get("Summer")
+    parts = []
+    if w:
+        parts.append(f"**winter** is {w[0]} ({w[1]:.0f}%)")
+    if s:
+        parts.append(f"**summer** is {s[0]} ({s[1]:.0f}%)")
+    scope = "worst" if bad_only else "all"
+    insight(
+        f"The pollutant responsible for {city}'s {scope} days "
+        + (" and ".join(parts) if parts else "varies by season")
+        + ". Delhi's burden is overwhelmingly **particulate** — fine PM2.5 in the "
+        "cold months, coarser PM10 as summer/monsoon dust rises — rather than "
+        "gaseous pollutants. (Validated: recomputed CPCB AQI tracks the dataset's "
+        f"AQI at r={val['correlation']:.2f}.)"
+    )
+    st.caption(
+        "Attribution recomputes each day's CPCB sub-index per pollutant from raw "
+        "concentrations; the responsible pollutant is the one with the highest "
+        "sub-index. Note: O₃ is understated here because city_day.csv provides "
+        "daily-mean O₃, whereas CPCB's ozone sub-index uses the 8-hour maximum."
     )
