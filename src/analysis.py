@@ -506,6 +506,73 @@ def seasonality_index(
     return out.dropna().sort_values("winter_monsoon_ratio", ascending=False).reset_index()
 
 
+# ---------------------------------------------------------------------------
+# Health-impact layer: how Delhi's PM2.5 compares to health limits, in days
+# exceeded and in cigarette-equivalents.
+# ---------------------------------------------------------------------------
+
+# PM2.5 reference levels, 24-hour mean (ug/m3) unless noted.
+WHO_PM25_24H = 15.0        # WHO 2021 air-quality guideline (24h)
+WHO_IT1_PM25_24H = 75.0    # WHO interim target 1 (24h)
+INDIA_PM25_24H = 60.0      # India NAAQS (24h)
+WHO_PM25_ANNUAL = 5.0      # WHO 2021 guideline (annual mean)
+INDIA_PM25_ANNUAL = 40.0   # India NAAQS (annual mean)
+
+# Berkeley Earth rule of thumb: ~22 ug/m3 of PM2.5 over a day ~ one cigarette.
+PM25_PER_CIGARETTE = 22.0
+
+
+def cigarettes_per_day(pm25: float) -> float:
+    """Approximate cigarette-equivalent of a day's PM2.5 exposure."""
+    return pm25 / PM25_PER_CIGARETTE
+
+
+def health_exceedance(df: pd.DataFrame, city: str, col: str = "PM2.5") -> pd.DataFrame:
+    """Per-year health burden: mean PM2.5, days/% over each limit, cigarettes/day.
+
+    Uses observed days only; n_days shows how many days back each year's figures.
+    """
+    sub = _city_frame(df, city)[["Date", col]].dropna(subset=[col])
+    sub = sub.assign(year=sub["Date"].dt.year)
+    rows: list[dict] = []
+    for year, g in sub.groupby("year"):
+        v = g[col]
+        n = len(v)
+        rows.append(
+            {
+                "year": int(year),
+                "n_days": n,
+                "mean_pm25": float(v.mean()),
+                "days_over_who": int((v > WHO_PM25_24H).sum()),
+                "days_over_india": int((v > INDIA_PM25_24H).sum()),
+                "clean_days": int((v <= WHO_PM25_24H).sum()),
+                "pct_over_who": float((v > WHO_PM25_24H).mean() * 100),
+                "pct_over_india": float((v > INDIA_PM25_24H).mean() * 100),
+                "avg_cigarettes_day": float(v.mean() / PM25_PER_CIGARETTE),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def health_summary(df: pd.DataFrame, city: str, col: str = "PM2.5") -> dict[str, float]:
+    """Headline health numbers across the whole record for one city."""
+    v = _city_frame(df, city)[col].dropna()
+    if v.empty:
+        raise ValueError(f"No {col} data for {city}.")
+    mean = float(v.mean())
+    return {
+        "n_days": int(v.size),
+        "mean_pm25": mean,
+        "pct_over_who": float((v > WHO_PM25_24H).mean() * 100),
+        "pct_over_india": float((v > INDIA_PM25_24H).mean() * 100),
+        "pct_clean": float((v <= WHO_PM25_24H).mean() * 100),
+        "x_who_annual": mean / WHO_PM25_ANNUAL,
+        "x_india_annual": mean / INDIA_PM25_ANNUAL,
+        "avg_cigarettes_day": mean / PM25_PER_CIGARETTE,
+        "cigarettes_year": mean / PM25_PER_CIGARETTE * 365,
+    }
+
+
 if __name__ == "__main__":
     from src.data_load import load_clean
 
@@ -604,4 +671,18 @@ if __name__ == "__main__":
         f"But the winter spike is a North-India pattern, not Delhi's alone — Delhi's "
         f"winter PM2.5 is {delhi_ratio:.1f}x monsoon, similar to Patna/Lucknow/Kolkata "
         f"(most seasonal: {most_seasonal['City']} {most_seasonal['winter_monsoon_ratio']:.1f}x)."
+    )
+
+    # ---- Health-impact layer --------------------------------------------
+    print(f"\n=== Health impact (PM2.5 vs limits) - {city} ===")
+    he = health_exceedance(df, city)
+    print(he.round(1).to_string(index=False))
+    hs = health_summary(df, city)
+    print(
+        f"-> {city} averages PM2.5 {hs['mean_pm25']:.0f} ug/m3 "
+        f"({hs['x_who_annual']:.0f}x the WHO annual guideline, "
+        f"{hs['x_india_annual']:.1f}x India's). {hs['pct_over_who']:.0f}% of days exceed "
+        f"the WHO 24h limit and {hs['pct_over_india']:.0f}% exceed India's; only "
+        f"{hs['pct_clean']:.0f}% are 'clean'. That's ~{hs['avg_cigarettes_day']:.1f} "
+        f"cigarettes/day, ~{hs['cigarettes_year']:.0f} a year, from breathing alone."
     )

@@ -21,6 +21,7 @@ analysis/forecast logic kept as pure, tested functions.
 | **Forecast** | Can we predict AQI? | A **SARIMA(1,1,2)(0,1,1,7)** model beats naive baselines on a 30-day holdout (MAE 24.7 vs 29.6). |
 | **Sources** | Which pollutant drives bad days? | Recomputed CPCB sub-indices (validated at **r=0.93** vs the dataset's AQI) show Delhi's bad days are **overwhelmingly particulate** — PM2.5 in winter (**86%**), PM10 rising with summer/monsoon dust. |
 | **Compare cities** | Is Delhi uniquely bad? | Delhi's mean AQI (**259**) is **~1.8×** other major cities and **65%** of its days are Poor+ — but the winter spike is a **shared North-India pattern** (Patna, Lucknow, Kolkata similar), while coastal/southern cities stay clean and flat. |
+| **Health** | What is it doing to people? | Delhi's PM2.5 averages **117 µg/m³ — 23× the WHO annual guideline**; **~100%** of days breach the WHO 24h limit and **~0%** are clean, equivalent to **~5 cigarettes/day (~1,900/year)** from breathing. |
 
 ## Methodology notes (why the numbers are trustworthy)
 
@@ -96,9 +97,12 @@ Kaggle — [Air Quality Data in India (2015–2020)](https://www.kaggle.com/data
 
 Deliberately out of scope for now, but natural extensions:
 
-- **Weather correlation** — wind/temperature vs dispersion.
+- **Weather correlation** — wind/temperature vs dispersion (needs an external
+  weather source; not in this dataset).
 - **8-hour-max sub-indices** — recompute O₃/CO attribution from the hourly file
   so ozone isn't understated (the Sources tab uses daily means).
+- **Model comparison** — SARIMA vs Prophet vs an ML baseline.
+- **Policy-impact analysis** — odd-even, GRAP interventions.
 - **Model comparison** — SARIMA vs Prophet vs ML.
 - **Policy-impact analysis** — odd-even, GRAP interventions.
 - **Health-impact layer** — days exceeding WHO limits.

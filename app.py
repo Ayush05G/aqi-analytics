@@ -12,12 +12,18 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.analysis import (
+    INDIA_PM25_24H,
+    INDIA_PM25_ANNUAL,
     MAJOR_CITIES,
     SEASON_ORDER,
+    WHO_PM25_24H,
+    WHO_PM25_ANNUAL,
     city_summary,
     compute_sub_indices,
     diwali_effect,
     dominant_pollutant_by_season,
+    health_exceedance,
+    health_summary,
     lockdown_effect,
     lockdown_summary,
     monthly_aqi_trend,
@@ -172,9 +178,10 @@ with st.sidebar:
         "days only; the forecast interpolates a handful of short daily gaps."
     )
 
-tab_trend, tab_season, tab_events, tab_forecast, tab_sources, tab_compare = st.tabs(
+(tab_trend, tab_season, tab_events, tab_forecast,
+ tab_sources, tab_compare, tab_health) = st.tabs(
     ["📉 Long-run trend", "🗓️ Seasonality", "🎆 Events", "🔮 Forecast",
-     "🧪 Sources", "🏙️ Compare cities"]
+     "🧪 Sources", "🏙️ Compare cities", "🫁 Health"]
 )
 
 
@@ -543,4 +550,61 @@ with tab_compare:
         "Means use observed days only; cities differ in coverage (e.g. Mumbai/Kolkata "
         "have fewer AQI days). Ahmedabad is excluded from the default set — its series "
         "looks anomalously high — but can be added manually."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Tab 7 — Health impact
+# --------------------------------------------------------------------------- #
+with tab_health:
+    st.subheader(f"What is {city}'s air doing to the people who breathe it?")
+
+    hs = health_summary(df, city, "PM2.5")
+    he = health_exceedance(df, city, "PM2.5")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Mean PM2.5", f"{hs['mean_pm25']:.0f} µg/m³")
+    c2.metric("× WHO annual limit", f"{hs['x_who_annual']:.0f}×")
+    c3.metric("Days over WHO 24h", f"{hs['pct_over_who']:.0f}%")
+    c4.metric("Cigarettes / day", f"{hs['avg_cigarettes_day']:.1f}")
+
+    # Per-year breakdown of day categories vs the 24h limits.
+    he = he.assign(
+        moderate=he["days_over_who"] - he["days_over_india"],  # WHO < x ≤ India
+    )
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=he["year"], y=he["clean_days"], name=f"Clean (≤{WHO_PM25_24H:.0f})", marker_color="#66bb6a"))
+    fig.add_trace(go.Bar(x=he["year"], y=he["moderate"], name=f"Over WHO (≤{INDIA_PM25_24H:.0f})", marker_color="#ffca28"))
+    fig.add_trace(go.Bar(x=he["year"], y=he["days_over_india"], name=f"Over India ({INDIA_PM25_24H:.0f}+)", marker_color="#ef5350"))
+    fig.update_layout(
+        height=380, barmode="stack", yaxis_title="Days in year", xaxis_title=None,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02), margin=dict(t=10, b=10),
+    )
+    st.plotly_chart(fig, width="stretch")
+
+    # Mean PM2.5 per year with guideline reference lines.
+    fig2 = go.Figure()
+    fig2.add_trace(go.Bar(x=he["year"], y=he["mean_pm25"], marker_color="#5c6bc0",
+                          text=he["mean_pm25"].round(0), textposition="outside", name="Annual mean PM2.5"))
+    fig2.add_hline(y=INDIA_PM25_ANNUAL, line_dash="dash", line_color="#ef5350",
+                   annotation_text=f"India annual ({INDIA_PM25_ANNUAL:.0f})", annotation_position="top left")
+    fig2.add_hline(y=WHO_PM25_ANNUAL, line_dash="dot", line_color="#2e7d32",
+                   annotation_text=f"WHO annual ({WHO_PM25_ANNUAL:.0f})", annotation_position="bottom left")
+    fig2.update_layout(height=340, yaxis_title="Annual mean PM2.5 (µg/m³)", xaxis_title=None, margin=dict(t=10, b=10))
+    st.plotly_chart(fig2, width="stretch")
+
+    insight(
+        f"{city}'s air averages **{hs['mean_pm25']:.0f} µg/m³** PM2.5 — "
+        f"**{hs['x_who_annual']:.0f}×** the WHO annual guideline and "
+        f"**{hs['x_india_annual']:.1f}×** India's. About **{hs['pct_over_who']:.0f}%** of "
+        f"days breach the WHO 24-hour limit and **{hs['pct_over_india']:.0f}%** breach "
+        f"India's; only **{hs['pct_clean']:.0f}%** of days are 'clean'. In cigarette terms "
+        f"that's roughly **{hs['avg_cigarettes_day']:.1f} cigarettes a day** — about "
+        f"**{hs['cigarettes_year']:.0f} a year** — from breathing alone."
+    )
+    st.caption(
+        f"Limits: WHO 2021 PM2.5 — 24h {WHO_PM25_24H:.0f}, annual {WHO_PM25_ANNUAL:.0f} µg/m³; "
+        f"India NAAQS — 24h {INDIA_PM25_24H:.0f}, annual {INDIA_PM25_ANNUAL:.0f} µg/m³. "
+        "Cigarette equivalence uses Berkeley Earth's ≈22 µg/m³·day ≈ 1 cigarette; it is a "
+        "communication heuristic, not a clinical dose. 2020 is a partial year."
     )
