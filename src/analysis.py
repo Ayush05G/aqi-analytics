@@ -25,14 +25,18 @@ MONTH_NAMES = (
 )
 
 # Main Diwali (Lakshmi Puja) date per year. The festival moves with the lunar
-# calendar, so these are looked up rather than computed. The dataset ends
-# 2020-07-01, so Diwali 2020 (14 Nov) is out of range and intentionally omitted.
+# calendar, so these are looked up rather than computed. diwali_effect skips any
+# year not covered by the loaded data, so out-of-range years are harmless.
+# (Data now runs to 2023-03; Diwali 2023 is in November, hence not included.)
 DIWALI_DATES: dict[int, str] = {
     2015: "2015-11-11",
     2016: "2016-10-30",
     2017: "2017-10-19",
     2018: "2018-11-07",
     2019: "2019-10-27",
+    2020: "2020-11-14",
+    2021: "2021-11-04",
+    2022: "2022-10-24",
 }
 
 # India's national COVID-19 lockdown began 25 Mar 2020. April-May 2020 sit fully
