@@ -35,7 +35,7 @@ from src.analysis import (
     validate_computed_aqi,
     yearly_aqi_trend,
 )
-from src.data_load import load_clean, load_raw
+from src.data_load import default_data_path, load_clean, load_raw
 from src.download_data import configure_credentials, ensure_city_day
 from src.forecast import backtest, forecast_future, naive_persistence, naive_seasonal
 
@@ -96,13 +96,21 @@ def _apply_kaggle_secrets() -> None:
     )
 
 
+def _resolve_data_path():
+    """Use the committed extended dataset if present; else fetch the Kaggle file."""
+    path = default_data_path()
+    if path.exists():
+        print(f"[app] using committed dataset: {path.name}", flush=True)
+        return path
+    print("[app] extended file absent; downloading Kaggle city_day…", flush=True)
+    _apply_kaggle_secrets()
+    return ensure_city_day()
+
+
 @st.cache_data(show_spinner="Loading air-quality data…")
 def get_data() -> pd.DataFrame:
-    """Ensure city_day.csv exists (download on cloud) then load + clean it."""
-    print("[app] get_data: applying secrets + ensuring dataset…", flush=True)
-    _apply_kaggle_secrets()
-    path = ensure_city_day()
-    df = load_clean(path)
+    """Load + clean the dataset (extended file preferred, Kaggle fallback)."""
+    df = load_clean(_resolve_data_path())
     print(f"[app] get_data: loaded {len(df):,} rows for {sorted(df['City'].unique())}", flush=True)
     return df
 
@@ -125,8 +133,7 @@ def cached_future(city: str, horizon: int):
 @st.cache_data(show_spinner="Loading all cities for comparison…")
 def get_all_data() -> pd.DataFrame:
     """Full all-city dataset (for the comparison tab), not NCR-filtered."""
-    _apply_kaggle_secrets()
-    return load_raw(ensure_city_day())
+    return load_raw(_resolve_data_path())
 
 
 @st.cache_data(show_spinner="Attributing pollution sources…")

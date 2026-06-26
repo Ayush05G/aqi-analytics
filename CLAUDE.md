@@ -16,6 +16,17 @@ synthetic. Filter to Delhi and NCR cities for the core analysis; keep other
 major cities available for the comparison phase. Raw data lives in data/ and is
 git-ignored (large); never commit it.
 
+Data range was extended to 2015-2023 (from the 2015-2020 Kaggle file) by
+rebuilding daily city values from raw hourly CPCB station files
+(abhisheksjha/time-series-air-quality-data-of-india-2010-2023) via
+src/build_city_day.py. Because Streamlit Cloud can't process ~1 GB of hourly
+data at runtime, the small (~4.5 MB) derived output is committed at
+data_processed/city_day_2015_2023.csv — this is the ONE sanctioned committed
+data file (a small validated DERIVED subset, not the raw data). Do not delete it
+thinking it violates the no-commit-data rule; the app loads it directly and only
+falls back to the Kaggle download if it's missing. Validated vs the original at
+r~0.97 (Delhi PM2.5).
+
 ## Tech stack
 - Python 3.11+, pandas, Plotly, Streamlit
 - statsmodels for seasonal decomposition + SARIMA forecast (or Prophet)

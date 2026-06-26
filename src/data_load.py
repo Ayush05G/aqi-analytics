@@ -12,7 +12,16 @@ from pathlib import Path
 
 import pandas as pd
 
-DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "city_day.csv"
+_ROOT = Path(__file__).resolve().parent.parent
+# Kaggle 2015-2020 file (downloaded into git-ignored data/).
+DATA_PATH = _ROOT / "data" / "city_day.csv"
+# Extended 2015-2023 file rebuilt from hourly CPCB stations (committed, derived).
+EXTENDED_PATH = _ROOT / "data_processed" / "city_day_2015_2023.csv"
+
+
+def default_data_path() -> Path:
+    """Prefer the committed extended (2015-2023) file; fall back to the Kaggle file."""
+    return EXTENDED_PATH if EXTENDED_PATH.exists() else DATA_PATH
 
 # Cities that make up the National Capital Region. Only those actually present in
 # the dataset are kept; we don't assume coverage (this dataset has Delhi +
@@ -46,15 +55,17 @@ KEY_POLLUTANTS: tuple[str, ...] = (
 KEY_COLUMNS: tuple[str, ...] = KEY_POLLUTANTS + ("AQI",)
 
 
-def load_raw(path: Path = DATA_PATH) -> pd.DataFrame:
-    """Read city_day.csv and parse Date to datetime, sorted by city then date.
+def load_raw(path: Path | None = None) -> pd.DataFrame:
+    """Read the city_day CSV and parse Date to datetime, sorted by city then date.
 
-    Raises FileNotFoundError with a hint to run the downloader if the CSV is
-    missing, and ValueError if any Date fails to parse.
+    Defaults to the extended file if present, else the Kaggle file. Raises
+    FileNotFoundError if neither exists, and ValueError if any Date fails to parse.
     """
+    path = path or default_data_path()
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. Run `python -m src.download_data` first."
+            f"{path} not found. Run `python -m src.build_city_day` (extended) or "
+            "`python -m src.download_data` (Kaggle 2015-2020) first."
         )
 
     df = pd.read_csv(path)
@@ -76,7 +87,7 @@ def filter_ncr(df: pd.DataFrame, cities: tuple[str, ...] = NCR_CITIES) -> pd.Dat
     return df[df["City"].isin(present)].reset_index(drop=True)
 
 
-def load_clean(path: Path = DATA_PATH) -> pd.DataFrame:
+def load_clean(path: Path | None = None) -> pd.DataFrame:
     """Load, parse, and filter to Delhi-NCR. No imputation — gaps are preserved."""
     return filter_ncr(load_raw(path))
 
