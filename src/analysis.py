@@ -118,19 +118,26 @@ class SeasonalDecomposition:
 
 
 def _monthly_series(df: pd.DataFrame, city: str, col: str, max_gap: int) -> tuple[pd.Series, int]:
-    """Gap-free monthly-mean series for decomposition + count of filled months."""
+    """Monthly-mean series for decomposition + count of filled months.
+
+    Short internal gaps (<= max_gap months) are interpolated. If a longer gap
+    remains (e.g. the 2023-2025 concentration hole), the LONGEST contiguous run
+    is returned rather than failing — so the decomposition reflects the period
+    that actually has data.
+    """
     sub = _city_frame(df, city)[["Date", col]].dropna(subset=[col])
     series = sub.set_index("Date").resample("MS")[col].mean()
-    # Trim leading/trailing empty months, then fill only short internal gaps.
     series = series.loc[series.first_valid_index():series.last_valid_index()]
-    n_interpolated = int(series.isna().sum())
     filled = series.interpolate(method="linear", limit=max_gap, limit_area="inside")
-    remaining = int(filled.isna().sum())
-    if remaining:
-        raise ValueError(
-            f"{city}/{col}: {remaining} month(s) remain missing after interpolating "
-            f"gaps up to {max_gap} months. Series too sparse for decomposition."
-        )
+
+    if filled.isna().any():
+        # Keep the longest contiguous stretch of present months.
+        valid = filled.notna()
+        run_id = (valid != valid.shift()).cumsum()
+        longest = valid.groupby(run_id).sum().idxmax()
+        filled = filled[(run_id == longest) & valid]
+
+    n_interpolated = int(series.reindex(filled.index).isna().sum())
     filled.name = col
     return filled, n_interpolated
 

@@ -15,13 +15,22 @@ import pandas as pd
 _ROOT = Path(__file__).resolve().parent.parent
 # Kaggle 2015-2020 file (downloaded into git-ignored data/).
 DATA_PATH = _ROOT / "data" / "city_day.csv"
-# Extended 2015-2023 file rebuilt from hourly CPCB stations (committed, derived).
-EXTENDED_PATH = _ROOT / "data_processed" / "city_day_2015_2023.csv"
+# Committed derived files, newest range first. 2015-2026 splices CPCB stations
+# (concentrations to 2023-03), the CPCB bulletin (AQI to 2025-04), and OpenAQ
+# (concentrations 2025+); 2015-2023 is the stations-only base.
+_DERIVED_PATHS = (
+    _ROOT / "data_processed" / "city_day_2015_2026.csv",
+    _ROOT / "data_processed" / "city_day_2015_2023.csv",
+)
+EXTENDED_PATH = _DERIVED_PATHS[0]
 
 
 def default_data_path() -> Path:
-    """Prefer the committed extended (2015-2023) file; fall back to the Kaggle file."""
-    return EXTENDED_PATH if EXTENDED_PATH.exists() else DATA_PATH
+    """Prefer the newest committed derived file; fall back to the Kaggle file."""
+    for p in _DERIVED_PATHS:
+        if p.exists():
+            return p
+    return DATA_PATH
 
 # Cities that make up the National Capital Region. Only those actually present in
 # the dataset are kept; we don't assume coverage (this dataset has Delhi +

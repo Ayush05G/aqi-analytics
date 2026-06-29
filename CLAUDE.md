@@ -21,11 +21,18 @@ rebuilding daily city values from raw hourly CPCB station files
 (abhisheksjha/time-series-air-quality-data-of-india-2010-2023) via
 src/build_city_day.py. Because Streamlit Cloud can't process ~1 GB of hourly
 data at runtime, the small (~4.5 MB) derived output is committed at
-data_processed/city_day_2015_2023.csv — this is the ONE sanctioned committed
-data file (a small validated DERIVED subset, not the raw data). Do not delete it
-thinking it violates the no-commit-data rule; the app loads it directly and only
-falls back to the Kaggle download if it's missing. Validated vs the original at
-r~0.97 (Delhi PM2.5).
+data_processed/city_day_2015_2023.csv. Later extended further to 2026: the app
+now loads data_processed/city_day_2015_2026.csv, spliced by src/extend_dataset.py
+from three real sources — the hourly-station rebuild (concentrations+AQI to
+2023-03), the official CPCB daily AQI bulletin (saikiranudayana, AQI-only
+2023-04..2025-04), and the OpenAQ v3 API (src/fetch_openaq.py, concentrations
+2025+). AQI is continuous to today; pollutant CONCENTRATIONS have a 2023-04..
+2024-12 gap (no public source — handled explicitly). Both committed derived CSVs
+(~4.5MB + ~7MB) are SANCTIONED exceptions to the no-commit-data rule (small,
+validated, DERIVED — not raw). Do not delete them; the app loads the 2026 file
+and only falls back to Kaggle if both are missing. Validated: stations r~0.97 vs
+rohanrao, bulletin r~0.97 on overlap. OpenAQ key lives at ~/.openaq/api_key
+(local only; not needed on cloud since the file is committed).
 
 ## Tech stack
 - Python 3.11+, pandas, Plotly, Streamlit

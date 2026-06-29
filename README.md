@@ -8,16 +8,19 @@ cycle, the impact of specific events (Diwali, stubble burning, the COVID
 lockdown), and a short-horizon AQI forecast — and surfaces a plain-English
 insight for every view, not just a chart.
 
-Built on **real CPCB data (2015–2023)** — the 2015–2020 Kaggle `city_day`
-extended to 2023 by rebuilding the daily city series from raw hourly CPCB station
-files (validated against the original at r≈0.97 for Delhi PM2.5). Streamlit
-dashboard with analysis/forecast logic kept as pure, tested functions.
+Built on **real CPCB data, 2015–2026**, stitched from three sources (each
+validated where they overlap): hourly CPCB stations rebuilt to daily city values
+(2015–2023, r≈0.97 vs the original Kaggle `city_day`), the official CPCB daily
+**AQI bulletin** (2023–2025), and the **OpenAQ** API (2025→today). AQI is
+continuous to the present; pollutant *concentrations* (PM2.5 µg/m³ etc.) have a
+2023–2025 gap where no public concentration source exists (handled explicitly in
+the UI). Streamlit dashboard with analysis/forecast logic kept as pure functions.
 
 ## What it shows
 
 | Section | Question it answers | Headline finding (Delhi) |
 |---|---|---|
-| **Long-run trend** | Is the air getting better? | Mean AQI eased from **~254 (2015)** to **~217 (2022)**, with a sharp **2020 lockdown dip (190)** followed by a **post-COVID rebound** — visible only now that the series runs to 2023. |
+| **Long-run trend** | Is the air getting better? | Mean AQI eased from **~254 (2015)** to **~200 (2025)**, with a sharp **2020 lockdown dip (190)**, a **post-COVID rebound**, then a plateau around 200 — visible now the series runs to 2026. |
 | **Seasonality** | When is it worst? | PM2.5 peaks in **November (~238)** and bottoms in **August (~43)** — a ~5× swing, confirmed by seasonal decomposition. |
 | **Events** | What drives bad-air days? | **Stubble burning** lifts Oct–Nov PM2.5 to **1.8× the rest of the year**; **Diwali** adds **+85%** over the prior fortnight; the **2020 lockdown** cut Apr–May PM2.5 by **~50%**. |
 | **Forecast** | Can we predict AQI? | A **SARIMA(1,1,2)(0,1,1,7)** model beats naive baselines on a 30-day holdout (MAE 24.7 vs 29.6). |
@@ -46,10 +49,13 @@ src/analysis.py      trends, decomposition, events, source attribution,
                      multi-city comparison, health impact (pure)
 src/forecast.py      SARIMA backtest + forecast (pure, isolated)
 src/download_data.py Kaggle fetch (2015-2020 fallback) / runtime bootstrap
-src/build_city_day.py  rebuild extended 2015-2023 daily data from hourly stations
+src/build_city_day.py  rebuild 2015-2023 daily data from hourly CPCB stations
+src/fetch_openaq.py    fetch recent (2025+) daily concentrations from OpenAQ
+src/extend_dataset.py  splice stations + CPCB bulletin + OpenAQ -> 2015-2026 file
 app.py               Streamlit UI only; imports from src/
-data/                raw data incl. hourly stations (git-ignored, never committed)
-data_processed/      committed derived file: city_day_2015_2023.csv (~4.5 MB)
+data/                raw data: hourly stations, bulletin, OpenAQ (git-ignored)
+data_processed/      committed derived files: city_day_2015_2026.csv (app loads
+                     this) + the 2015_2023 stations-only base
 ```
 
 ## Run locally
@@ -91,15 +97,21 @@ that file is ever removed, the app falls back to downloading the 2015-2020
 
 ## Data
 
-- **Extended 2015–2023** (used by the app): rebuilt from raw hourly CPCB station
-  files — [Time Series Air Quality Data of India 2010–2023](https://www.kaggle.com/datasets/abhisheksjha/time-series-air-quality-data-of-india-2010-2023)
-  — aggregated to daily city values via `src/build_city_day.py`, with AQI
-  recomputed as the max CPCB sub-index (8-hour max for O₃/CO). Validated against
-  the original at **r≈0.97** (Delhi PM2.5).
-- **Original 2015–2020** (fallback): [Air Quality Data in India](https://www.kaggle.com/datasets/rohanrao/air-quality-data-in-india),
-  `city_day.csv`.
+The app loads `data_processed/city_day_2015_2026.csv`, spliced from three real
+sources (priority for AQI: stations → bulletin → OpenAQ):
 
-Source: India's Central Pollution Control Board (CPCB).
+1. **2015–2023 concentrations + AQI** — rebuilt from raw hourly CPCB stations
+   ([Time Series Air Quality Data of India 2010–2023](https://www.kaggle.com/datasets/abhisheksjha/time-series-air-quality-data-of-india-2010-2023))
+   via `src/build_city_day.py`; AQI = max CPCB sub-index (8h-max O₃/CO).
+   Validated **r≈0.97** vs the original [rohanrao city_day](https://www.kaggle.com/datasets/rohanrao/air-quality-data-in-india).
+2. **2023–2025 AQI** — official [CPCB daily AQI bulletin](https://www.kaggle.com/datasets/saikiranudayana/india-air-quality-index-aqi-dataset-20232025)
+   (AQI + prominent pollutant only). Validated **r≈0.97** on the 2022–23 overlap.
+3. **2025→today concentrations + AQI** — the [OpenAQ](https://openaq.org) v3 API
+   (`src/fetch_openaq.py`); PM2.5/PM10/NO2/O3 in µg/m³ (CO/SO₂ dropped — OpenAQ's
+   India gas units are inconsistent).
+
+**Known gap:** pollutant *concentrations* are missing 2023-04 → 2024-12 (no public
+source); **AQI is continuous** throughout. Source: India's CPCB.
 
 ## Future work
 

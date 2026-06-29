@@ -170,7 +170,8 @@ st.title("🌫️ Delhi-NCR Air Quality Analytics")
 st.caption(
     "Beyond basic EDA: long-run trends, the seasonal cycle, event impacts "
     "(Diwali, stubble burning, COVID lockdown), and a short-horizon AQI forecast — "
-    "each with a plain-English takeaway. Data: CPCB via Kaggle, 2015–2020."
+    "each with a plain-English takeaway. Real CPCB data, 2015–2026 (hourly "
+    "stations + official AQI bulletin + OpenAQ)."
 )
 
 with st.sidebar:
@@ -196,7 +197,7 @@ with st.sidebar:
 # Tab 1 — Long-run trend
 # --------------------------------------------------------------------------- #
 with tab_trend:
-    st.subheader(f"How has {city}'s air changed, 2015–2020?")
+    st.subheader(f"How has {city}'s air changed over the years?")
     monthly = monthly_aqi_trend(df, city, "AQI")
     yearly = yearly_aqi_trend(df, city, "AQI")
 
@@ -288,8 +289,10 @@ with tab_season:
             st.plotly_chart(fig2, width="stretch")
             st.caption(
                 f"Decomposition on {len(dec.observed)} monthly points "
-                f"({dec.n_interpolated} interpolated). The seasonal component repeats "
-                "each year; red months push pollution up, blue months pull it down."
+                f"({dec.observed.index.min():%b %Y}–{dec.observed.index.max():%b %Y}, "
+                f"{dec.n_interpolated} interpolated) — the longest gap-free run. The "
+                "seasonal component repeats each year; red months push pollution up, "
+                "blue months pull it down."
             )
         except ValueError as exc:
             st.warning(f"Not enough clean data to decompose {pollutant} for {city}: {exc}")
